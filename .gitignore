@@ -3,6 +3,14 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+
+# Project Scoped Databases
+*.db
+
+# PyCharm Related
+.idea/*
+
+
 # C extensions
 *.so
 
