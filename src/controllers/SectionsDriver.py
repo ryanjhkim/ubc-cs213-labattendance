@@ -9,9 +9,11 @@ import requests
 import argparse
 from bs4 import BeautifulSoup
 from src.models.Section import init_from_tuple
-from src.repositories.SectionDatabase import insert_section_batch, create_table_name, create_table_sql
+from src.repositories.SectionDatabase import insert_section_batch, create_table_name, \
+    create_table_sql, get_lab_section_by_time
 from src.repositories.Database import get_connection, create_table
-from constants import UBC_CS213_URL, LAB
+from constants import UBC_CS213_URL, LAB, SUMMER_TERM_ABRV
+from src.utils.TimeUtil import get_vancouver_time_now, get_time_in_strf, get_current_term
 
 
 def sections_cmd_parser():
@@ -41,18 +43,28 @@ def is_valid_section(section, term, activity_type=LAB):
     return section is not None and section.term == term and section.activity == activity_type
 
 
-if __name__ == "__main__":
-    parser = sections_cmd_parser()
-    args = parser.parse_args()
-    arg_map = vars(args)
-    if not all(arg_map[arg_key] is not None for arg_key in arg_map):
+def get_current_lab_section():
+    van_time = get_vancouver_time_now()
+    van_time_str = get_time_in_strf(van_time)
+    date, time, weekday = van_time_str.split(" ")
+    year, month, day = date.split("/")
+    term, term_abrv = get_current_term()
+    is_summer = term_abrv == SUMMER_TERM_ABRV
+    table_name = create_table_name(year, term, is_summer=is_summer)
+    curr_lab_section = get_lab_section_by_time(table_name, time, weekday)
+    print(curr_lab_section)
+    return curr_lab_section
+
+
+def setup(args_dict):
+    if not all(args_dict[arg_key] is not None for arg_key in args_dict):
         raise AssertionError('1 or more required inputs were not provided values - please provide required input')
     print("Received following arguments: \n", arg_map)
 
     # Required Variables
-    TERM = arg_map['term']
-    IS_SUMMER = arg_map['isSummer']
-    YEAR = arg_map['year']
+    TERM = args_dict['term']
+    IS_SUMMER = args_dict['isSummer']
+    YEAR = args_dict['year']
 
     # Find relevant sections to UBC CS213 Labs
     soup = BeautifulSoup(requests.get(UBC_CS213_URL).text, "html.parser")
@@ -60,15 +72,22 @@ if __name__ == "__main__":
     rows_soup = section_soup.find_all("tr")
 
     # Parse table rows to local data structure
-    sections = get_sections(rows_soup, arg_map['term'])
+    sections = get_sections(rows_soup, args_dict['term'])
 
     try:
         conn = get_connection()
-        table_name = create_table_name(YEAR, TERM, course_code='CPSC213', isSummer=IS_SUMMER)
-        sql = create_table_sql(YEAR, TERM, course_code='CPSC213', isSummer=IS_SUMMER)
+        table_name = create_table_name(YEAR, TERM, course_code='CPSC213', is_summer=IS_SUMMER)
+        sql = create_table_sql(YEAR, TERM, course_code='CPSC213', is_summer=IS_SUMMER)
         create_table(conn, sql)
         sections_db = [section.convert_to_db_tuple() for section in sections]
         insert_section_batch(conn, table_name, sections_db)
         conn.close()
     except Exception as e:
         print("Failed to sink sections data")
+
+
+if __name__ == "__main__":
+    parser = sections_cmd_parser()
+    args = parser.parse_args()
+    arg_map = vars(args)
+    setup(arg_map)
